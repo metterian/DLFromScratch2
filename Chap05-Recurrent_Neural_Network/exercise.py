@@ -1,16 +1,22 @@
-#%%
 import sys
-sys.path.append('..')
+import os
 import numpy as np
-# %%
+from dataclasses import dataclass
+sys.path.append(os.path.abspath(os.path.curdir))
+
+
+
+@dataclass
 class RNN:
-    def __init__(self, Wx, Wh, b) -> None:
-        self.params = [Wx, Wh, b]
-        self.grads = [
-            np.zeros_like(Wx),
-            np.zeros_like(Wh),
-            np.zeros_like(b)
-        ]
+    '''Inputting the parameters for RNN Block'''
+    Wx : np.ndarray
+    Wh : np.ndarray
+    Wb : np.ndarray
+
+    def __post_init__(self):
+        '''Initiate parameters and gradients'''
+        self.params = [self.Wx, self.Wh, self.b]
+        self.grads = [np.zeros_like(self.Wx), np.zeros_like(self.Wh), np.zeros_like(self.b)]
         self.cache = None
 
     def forward(self, x, h_prev):
@@ -19,18 +25,18 @@ class RNN:
         h_next = np.tanh(t)
 
         self.cache = (x, h_prev, h_next)
-
+        return h_next
 
     def backward(self, dh_next):
         Wx, Wh, b = self.params
         x, h_prev, h_next = self.cache
 
         dt = dh_next * (1 - h_next**2)
-        db = np.sum(dt, axis=0)
+        db = np.sum(dt, axis = 0)
         dWh = np.matmul(h_prev.T, dt)
         dh_prev = np.matmul(dt, Wh.T)
-        dWx = np.matmul(dt, Wx.T)
-        dx = np.matmul(dt, Wx.T)
+        dWx = np.matmul(x.T, dt)
+        dx = np.matmul(dt, Wh.T)
 
         self.grads[0][...] = dWx
         self.grads[1][...] = dWh
@@ -39,29 +45,39 @@ class RNN:
         return dx, dh_prev
 
 
-#%%
+@dataclass
 class TimeRNN:
-    def __init__(self, Wx, Wh, b, stateful = False) -> None:
-        self.params = [Wx, Wh, b]
-        self.grads = [np.zeros_like(Wx), np.zeros_like(Wh), np.zeros_like(b)]
-        self.layers = None # 다수의 RNN 계층을 리스트로 저장하는 용도
+    '''Collection of RNN Blocks through time'''
+    Wx : np.ndarray
+    Wh : np.ndarray
+    Wb : np.ndarray
+    stateful : bool = False
+
+    def __post_init__(self):
+        self.params = [self.Wx, self.Wh, self.b]
+        self.grads = [np.zeros_like(self.Wx), np.zeros_like(self.Wh), np.zeros_like(self.b)]
+        self.layers = None
 
         self.h, self.dh = None, None
-        self.stateful = stateful
 
-    def set_setate(self, h):
+    def set_state(self, h):
+        '''To save RNN layers as Instance'''
         self.h = h
 
-    def reset_setate(self):
+    def reset_state(self):
         self.h = None
+
 
     def forward(self, xs):
         '''
-        xs: T개의 분량이 시계열 데이터를 하나로 모은 것
+        xs: T개 분량의 시계열 데이터를 모은 것
+        N : 미니배치의 데이터 수
+        T : 시계열 데이터의 길이
+        D : 입력 데이터의 크기
         '''
         Wx, Wh, b = self.params
         N, T, D = xs.shape
-        D, H = Wx.shape
+        D, H = Wh.shape
 
         self.layers = []
         hs = np.empty((N, T, H), dtype='f')
@@ -72,7 +88,7 @@ class TimeRNN:
         for t in range(T):
             layer = RNN(*self.params)
             self.h = layer.forward(xs[:, t, :], self.h)
-            hs[: ,t, ] = self.h
+            hs[:, t, :] = self.h
             self.layers.append(layer)
 
         return hs
@@ -85,9 +101,10 @@ class TimeRNN:
         dxs = np.empty((N, T, D), dtype='f')
         dh = 0
         grads = [0, 0, 0]
+
         for t in reversed(range(T)):
             layer = self.layers[t]
-            dx, dh = layer.backward(dhs[:, t, :] + dh) # 분기된 출력을 합산
+            dx, dh = layer.backward(dhs[:, t:, ]+ dh)
             dxs[:, t, :] = dx
 
             for i, grad in enumerate(layer.grads):
@@ -98,5 +115,9 @@ class TimeRNN:
         self.dh = dh
 
         return dxs
+
+
+
+
 
 
